@@ -5,6 +5,7 @@ These scripts parse trace log files to track thread entry and exit points, calcu
 ## Files
 
 - `trace_analyzer.sh` - Bash version (works without Python dependencies)
+- `trace_analyzer_aix.sh` - AIX-compatible version (no grep -o, no bash 4 features)
 - `trace_analyzer.py` - Python version (more advanced features, requires Python 3)
 - `trace_analyzer_debug.sh` - Debug version for troubleshooting
 
@@ -13,6 +14,11 @@ These scripts parse trace log files to track thread entry and exit points, calcu
 ### Bash Script (Recommended)
 ```bash
 ./trace_analyzer.sh <log_file> <entry_pattern> <exit_pattern> <threshold_seconds>
+```
+
+### AIX-Compatible Bash Script
+```bash
+./trace_analyzer_aix.sh <log_file> <entry_pattern> <exit_pattern> <threshold_seconds>
 ```
 
 ### Python Script
@@ -119,6 +125,12 @@ Analysis complete.
 ### Bash Script
 - bash 3.2+ (macOS default)
 - Standard Unix utilities: grep, sed, awk, cut, bc, date
+
+### AIX-Compatible Bash Script
+- bash 3.0+ or ksh (AIX compatible)
+- Standard Unix utilities: grep, sed, awk, cut, expr, date
+- Does NOT require: grep -o, bc, bash 4 brace expansion
+- Uses awk for floating point arithmetic instead of bc
 
 ### Python Script  
 - Python 3.6+
