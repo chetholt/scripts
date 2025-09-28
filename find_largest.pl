@@ -8,14 +8,20 @@ use Getopt::Long;
 # Global variables
 my @files = ();
 my %dir_sizes = ();
+my @directories = ();
 my $search_dir = '.';
 my $num_results = 20;
 my $help = 0;
+my $verbose = 0;
+my $max_depth = 0;
+my $file_count = 0;
+my $dir_count = 0;
 
 # Parse command line options
 GetOptions(
     'directory|d=s' => \$search_dir,
     'number|n=i'    => \$num_results,
+    'verbose|v'     => \$verbose,
     'help|h'        => \$help
 ) or die "Error parsing options!\n";
 
@@ -41,12 +47,23 @@ print "Showing top $num_results results...\n\n";
 my $start_time = time();
 
 # Find all files and directories
-print "Scanning files and directories...\n";
+print "Scanning files and directories recursively...\n";
+if ($verbose) {
+    print "Starting recursive scan from: $search_dir\n";
+}
 
-find(\&process_item, $search_dir);
+# Use File::Find with explicit options to ensure full recursion
+find({
+    wanted => \&process_item,
+    follow => 0,        # Don't follow symbolic links
+    no_chdir => 1,     # Don't change directory during traversal
+}, $search_dir);
 
 my $scan_time = time() - $start_time;
-print "Scan completed in $scan_time seconds.\n\n";
+print "Scan completed in $scan_time seconds.\n";
+print "Found $file_count files and $dir_count directories\n";
+print "Maximum directory depth: $max_depth\n" if $verbose;
+print "\n";
 
 # Sort files by size (descending)
 @files = sort { $b->[0] <=> $a->[0] } @files;
@@ -69,6 +86,7 @@ Usage: $0 [options] [directory] [number_of_results]
 Options:
     -d, --directory DIR    Directory to search (default: current directory)
     -n, --number NUM       Number of results to show (default: 20)
+    -v, --verbose         Show verbose output with progress information
     -h, --help            Show this help message
 
 Examples:
@@ -76,6 +94,7 @@ Examples:
     $0 /path/to/dir             # Search specific directory
     $0 /path/to/dir 10          # Search directory, show top 10
     $0 -d /path/to/dir -n 15    # Using options
+    $0 -v /path/to/dir          # Verbose mode
 EOF
 }
 
@@ -84,48 +103,109 @@ sub process_item {
     my $full_path = $File::Find::name;
     my $relative_path = $full_path;
     
-    # Convert absolute path to relative if we're searching current directory
+    # Convert to relative path if searching current directory
     if ($search_dir eq '.') {
-        $relative_path =~ s/^.\///;
+        $relative_path =~ s/^.\/;//;
+    } elsif ($search_dir ne '/') {
+        # Remove the search directory prefix for cleaner output
+        my $search_prefix = $search_dir;
+        $search_prefix =~ s/\/$//;  # Remove trailing slash
+        $relative_path =~ s/^\Q$search_prefix\E\/?//;
     }
+    
+    # Calculate directory depth for statistics
+    my $depth = ($relative_path =~ tr/\//\//);  # Count forward slashes
+    $max_depth = $depth if $depth > $max_depth;
     
     # Get file stats
     my @stat = lstat($full_path);
-    return unless @stat;  # Skip if we can't stat the file
+    unless (@stat) {
+        print "Warning: Cannot access $full_path\n" if $verbose;
+        return;
+    }
     
     my $size = $stat[7];
     my $is_dir = -d $full_path;
     
-    # Store file information (including directories as files for now)
-    unless ($is_dir) {
-        push @files, [$size, $relative_path, 'file'];
-    }
-    
-    # Initialize directory size tracking
     if ($is_dir) {
-        $dir_sizes{$relative_path} = 0 unless exists $dir_sizes{$relative_path};
+        $dir_count++;
+        # Store directory info
+        push @directories, [$relative_path, $full_path];
+        $dir_sizes{$relative_path} = 0;
+        
+        # Progress output for verbose mode
+        if ($verbose && $dir_count % 1000 == 0) {
+            print "Processed $dir_count directories, $file_count files...\n";
+        }
+    } else {
+        $file_count++;
+        # Store file information
+        push @files, [$size, $relative_path, 'file'];
+        
+        # Progress output for verbose mode
+        if ($verbose && $file_count % 10000 == 0) {
+            print "Processed $file_count files, $dir_count directories...\n";
+        }
     }
 }
 
 # Calculate directory sizes by summing up contained files
 sub calculate_directory_sizes {
-    # First, add all file sizes to their containing directories
+    print "Calculating directory sizes...\n";
+    
+    # Initialize all directories to 0
+    foreach my $dir_ref (@directories) {
+        my ($rel_path, $full_path) = @$dir_ref;
+        $dir_sizes{$rel_path} = 0;
+    }
+    
+    # Add each file's size to all its parent directories
+    my $processed = 0;
     foreach my $file_ref (@files) {
-        my ($size, $path, $type) = @$file_ref;
+        my ($size, $file_path, $type) = @$file_ref;
         
-        # Get all parent directories of this file
-        my $dir = dirname($path);
+        # Get the directory containing this file
+        my $file_dir = dirname($file_path);
         
-        # Add file size to all parent directories
-        while ($dir && $dir ne '.' && $dir ne '/') {
-            $dir_sizes{$dir} += $size if exists $dir_sizes{$dir};
-            $dir = dirname($dir);
+        # Add file size to this directory and all parent directories
+        my $current_dir = $file_dir;
+        while ($current_dir && $current_dir ne '.' && $current_dir ne '/' && $current_dir ne '') {
+            if (exists $dir_sizes{$current_dir}) {
+                $dir_sizes{$current_dir} += $size;
+            }
+            # Move to parent directory
+            my $parent = dirname($current_dir);
+            last if $parent eq $current_dir; # Avoid infinite loop
+            $current_dir = $parent;
         }
         
-        # Also add to root search directory if it's not '.'
-        if ($search_dir ne '.') {
-            $dir_sizes{$search_dir} += $size if exists $dir_sizes{$search_dir};
+        # Also add to root directory if we have files in the root
+        if ($file_dir eq '.' || $file_dir eq '') {
+            # This file is in the root of our search, add to search directory
+            my $root_key = '';
+            foreach my $dir_ref (@directories) {
+                my ($rel_path, $full_path) = @$dir_ref;
+                if ($rel_path eq '' || $rel_path eq '.') {
+                    $dir_sizes{$rel_path} += $size;
+                    last;
+                }
+            }
         }
+        
+        $processed++;
+        if ($verbose && $processed % 50000 == 0) {
+            print "Calculated sizes for $processed files...\n";
+        }
+    }
+    
+    # Remove directories with zero size (they might be empty or inaccessible)
+    foreach my $dir (keys %dir_sizes) {
+        delete $dir_sizes{$dir} if $dir_sizes{$dir} == 0;
+    }
+    
+    if ($verbose) {
+        my $dir_with_sizes = scalar(keys %dir_sizes);
+        print "Found $dir_with_sizes directories with content\n";
     }
 }
 
