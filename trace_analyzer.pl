@@ -5,6 +5,10 @@
 #
 # Usage: perl trace_analyzer.pl <log_file> <entry_pattern> <exit_pattern> <threshold_seconds>
 # Example: perl trace_analyzer.pl trace.log "doRequest ENTRY" "doRequest RETURN" 3
+#
+# NOTE:
+# *** You must have this trace spec enabled in AAC: com.tivoli.am.fim.fedmgr2.msg.BrowserResponseImpl=FINE:com.tivoli.am.fim.fedmgr2.servlet.SSOPSServletBase=FINER ***
+
 
 use strict;
 use warnings;
